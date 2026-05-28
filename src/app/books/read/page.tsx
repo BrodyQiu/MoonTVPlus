@@ -103,6 +103,7 @@ interface EpubBookInstance {
 interface EpubRendition {
   display: (target?: string) => Promise<void>;
   on: (event: 'relocated', callback: (location: EpubLocation) => void) => void;
+  currentLocation?: () => EpubLocation;
   prev?: () => void;
   next?: () => void;
   destroy?: () => void;
@@ -469,6 +470,87 @@ function parseChapterScrollLocator(value?: string) {
   return Math.max(0, Math.min(1, ratio));
 }
 
+function getHrefFromScrollLocator(value?: string) {
+  if (!value || parseChapterScrollLocator(value) === null) return '';
+  return value.split('#scroll=')[0] || '';
+}
+
+function getScrolledPositionFromRecord(
+  record?: BookReadRecord | null
+): ScrolledReadingPosition | null {
+  const ratio = parseChapterScrollLocator(record?.locator?.value);
+  if (ratio === null) return null;
+  const href =
+    record?.chapterHref ||
+    record?.locator?.href ||
+    getHrefFromScrollLocator(record?.locator?.value);
+  if (!href) return null;
+  return {
+    href,
+    scrollTop: ratio,
+    scrollHeight: 2,
+    clientHeight: 1,
+    updatedAt: record?.saveTime || Date.now(),
+  };
+}
+
+function getWindowScrollMetrics() {
+  if (typeof window === 'undefined' || typeof document === 'undefined')
+    return null;
+  const root = document.scrollingElement || document.documentElement;
+  const scrollTop = Math.max(
+    0,
+    window.scrollY || root?.scrollTop || document.body?.scrollTop || 0
+  );
+  const scrollHeight = Math.max(
+    root?.scrollHeight || 0,
+    document.documentElement?.scrollHeight || 0,
+    document.body?.scrollHeight || 0
+  );
+  const clientHeight =
+    root?.clientHeight || document.documentElement?.clientHeight || window.innerHeight || 0;
+  const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
+  return { scrollTop, scrollHeight, clientHeight, maxScrollTop };
+}
+
+function getChapterScrollMetrics(node: HTMLDivElement | null) {
+  const nodeScrollHeight = node?.scrollHeight || 0;
+  const nodeClientHeight = node?.clientHeight || 0;
+  const nodeScrollTop = Math.max(0, node?.scrollTop || 0);
+  const nodeMaxScrollTop = Math.max(0, nodeScrollHeight - nodeClientHeight);
+  const windowMetrics = getWindowScrollMetrics();
+
+  if (
+    windowMetrics &&
+    windowMetrics.maxScrollTop > 0 &&
+    (windowMetrics.scrollTop > 0 || nodeMaxScrollTop <= 0)
+  ) {
+    return windowMetrics;
+  }
+
+  return {
+    scrollTop: nodeScrollTop,
+    scrollHeight: nodeScrollHeight,
+    clientHeight: nodeClientHeight,
+    maxScrollTop: nodeMaxScrollTop,
+  };
+}
+
+function setChapterScrollTop(node: HTMLDivElement | null, top: number) {
+  const metrics = getChapterScrollMetrics(node);
+  const targetTop = Math.max(0, Math.min(metrics.maxScrollTop, top));
+  const windowMetrics = getWindowScrollMetrics();
+  if (
+    windowMetrics &&
+    metrics.scrollHeight === windowMetrics.scrollHeight &&
+    metrics.clientHeight === windowMetrics.clientHeight
+  ) {
+    window.scrollTo({ top: targetTop, behavior: 'auto' });
+    return;
+  }
+  node?.scrollTo({ top: targetTop, behavior: 'auto' });
+}
+
 function flattenToc(items: TocItem[]): TocItem[] {
   return items.flatMap((item) => [item, ...flattenToc(item.subitems || [])]);
 }
@@ -594,6 +676,9 @@ function ChapterReader({ manifest }: { manifest: BookReadManifest }) {
   const restoredChapterPositionRef = useRef(false);
   const chapterSaveTimerRef = useRef<number | null>(null);
   const pendingChapterRestoreRatioRef = useRef<number | null>(null);
+  const lastChapterScrollMetricsRef = useRef<ReturnType<
+    typeof getChapterScrollMetrics
+  > | null>(null);
   const currentIndexRef = useRef(0);
   const lastChapterSavedAtRef = useRef(0);
   const lastChapterSavedLocatorValueRef = useRef(
@@ -735,12 +820,15 @@ function ChapterReader({ manifest }: { manifest: BookReadManifest }) {
 
   const buildChapterReadRecord = useCallback(
     (item: BookChapter, index: number): BookReadRecord => {
-      const node = scrollRef.current;
-      const scrollTop = node?.scrollTop || 0;
-      const scrollHeight = node?.scrollHeight || 0;
-      const clientHeight = node?.clientHeight || 0;
+      const currentMetrics = getChapterScrollMetrics(scrollRef.current);
+      const savedMetrics = lastChapterScrollMetricsRef.current;
+      const { scrollTop, scrollHeight, clientHeight, maxScrollTop } =
+        currentMetrics.scrollTop === 0 &&
+        savedMetrics &&
+        savedMetrics.scrollTop > 0
+          ? savedMetrics
+          : currentMetrics;
       const chapterCount = Math.max(1, chapters.length);
-      const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
       const chapterRatio =
         maxScrollTop > 0
           ? Math.max(0, Math.min(1, scrollTop / maxScrollTop))
@@ -861,7 +949,8 @@ function ChapterReader({ manifest }: { manifest: BookReadManifest }) {
     stopTts(true);
     setLoading(true);
     setError('');
-    scrollRef.current?.scrollTo({ top: 0, behavior: 'auto' });
+    lastChapterScrollMetricsRef.current = null;
+    setChapterScrollTop(scrollRef.current, 0);
     pendingChapterRestoreRatioRef.current = null;
     const params = new URLSearchParams({
       sourceId: manifest.book.sourceId,
@@ -930,18 +1019,21 @@ function ChapterReader({ manifest }: { manifest: BookReadManifest }) {
       const node = scrollRef.current;
       if (!node) return;
       if (settings.mode === 'scrolled') return;
-      const delta = Math.max(240, node.clientHeight * 0.88) * direction;
-      const maxTop = Math.max(0, node.scrollHeight - node.clientHeight);
-      const nextTop = Math.max(0, Math.min(maxTop, node.scrollTop + delta));
-      if (direction > 0 && node.scrollTop >= maxTop - 8) {
+      const metrics = getChapterScrollMetrics(node);
+      const delta = Math.max(240, metrics.clientHeight * 0.88) * direction;
+      const nextTop = Math.max(
+        0,
+        Math.min(metrics.maxScrollTop, metrics.scrollTop + delta)
+      );
+      if (direction > 0 && metrics.scrollTop >= metrics.maxScrollTop - 8) {
         if (currentIndex < chapters.length - 1) goNextChapter();
         return;
       }
-      if (direction < 0 && node.scrollTop <= 8) {
+      if (direction < 0 && metrics.scrollTop <= 8) {
         if (currentIndex > 0) goPrevChapter();
         return;
       }
-      node.scrollTo({ top: nextTop, behavior: 'smooth' });
+      setChapterScrollTop(node, nextTop);
     },
     [chapters.length, currentIndex, goNextChapter, goPrevChapter, settings.mode]
   );
@@ -1062,12 +1154,12 @@ function ChapterReader({ manifest }: { manifest: BookReadManifest }) {
         if (attempt < 20) window.setTimeout(() => restore(attempt + 1), 100);
         return;
       }
-      const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
+      const { maxScrollTop } = getChapterScrollMetrics(node);
       if (maxScrollTop <= 0 && attempt < 20) {
         window.setTimeout(() => restore(attempt + 1), 100);
         return;
       }
-      node.scrollTo({ top: maxScrollTop * savedRatio, behavior: 'auto' });
+      setChapterScrollTop(node, maxScrollTop * savedRatio);
       restoredChapterPositionRef.current = true;
       pendingChapterRestoreRatioRef.current = null;
       window.setTimeout(() => persistChapterProgress(), 0);
@@ -1082,11 +1174,21 @@ function ChapterReader({ manifest }: { manifest: BookReadManifest }) {
   useEffect(() => {
     const node = scrollRef.current;
     if (!node) return;
-    node.addEventListener('scroll', scheduleChapterProgressSave, {
+    const handleScroll = () => {
+      lastChapterScrollMetricsRef.current = getChapterScrollMetrics(
+        scrollRef.current
+      );
+      scheduleChapterProgressSave();
+    };
+    node.addEventListener('scroll', handleScroll, {
+      passive: true,
+    });
+    window.addEventListener('scroll', handleScroll, {
       passive: true,
     });
     return () => {
-      node.removeEventListener('scroll', scheduleChapterProgressSave);
+      node.removeEventListener('scroll', handleScroll);
+      window.removeEventListener('scroll', handleScroll);
       if (chapterSaveTimerRef.current) {
         window.clearTimeout(chapterSaveTimerRef.current);
         chapterSaveTimerRef.current = null;
@@ -2217,8 +2319,37 @@ export default function BookReadPage() {
         clientHeight: metrics.clientHeight,
         updatedAt: Date.now(),
       });
+      const chapterTitle = lastChapterRef.current || currentChapter || manifest.book.title;
+      pendingRecordRef.current = {
+        sourceId: manifest.book.sourceId,
+        sourceName: manifest.book.sourceName,
+        bookId: manifest.book.id,
+        title: manifest.book.title,
+        author: manifest.book.author,
+        cover: manifest.book.cover,
+        detailHref: manifest.book.detailHref,
+        acquisitionHref: manifest.acquisitionHref,
+        format: manifest.format,
+        locator: {
+          type: 'href',
+          value: encodeChapterScrollLocator(
+            href,
+            metrics.scrollTop,
+            metrics.scrollHeight,
+            metrics.clientHeight
+          ),
+          href,
+          chapterTitle,
+        },
+        chapterTitle,
+        chapterHref: href,
+        progressPercent:
+          lastProgressRef.current ?? manifest.lastRecord?.progressPercent ?? 0,
+        saveTime: Date.now(),
+      };
+      pendingRecordDirtyRef.current = true;
     },
-    [manifest]
+    [currentChapter, manifest]
   );
 
   const applyPendingScrolledRestore = useCallback(() => {
@@ -2284,6 +2415,27 @@ export default function BookReadPage() {
     if (!renditionRef.current) return;
     await renditionRef.current.display(target);
   }, []);
+
+  const captureCurrentEpubLocation = useCallback(() => {
+    const location = renditionRef.current?.currentLocation?.();
+    if (location?.start?.cfi || location?.end?.cfi) {
+      lastLocationRef.current = location;
+      currentHrefRef.current =
+        location.start?.href || currentHrefRef.current || '';
+      return location;
+    }
+    return lastLocationRef.current;
+  }, []);
+
+  const switchReaderMode = useCallback(
+    (mode: ReaderMode) => {
+      if (mode === settingsRef.current.mode) return;
+      captureCurrentEpubLocation();
+      persistCurrentProgress();
+      setSettings((prev) => ({ ...prev, mode }));
+    },
+    [captureCurrentEpubLocation, persistCurrentProgress]
+  );
 
   const handleReaderTap = useCallback(
     (zone: 'left' | 'center' | 'right') => {
@@ -2619,7 +2771,11 @@ export default function BookReadPage() {
       currentSessionHref ||
       manifest.lastRecord?.chapterHref ||
       manifest.lastRecord?.locator?.href ||
+      getHrefFromScrollLocator(manifest.lastRecord?.locator?.value) ||
       undefined;
+    const historyScrolledPosition = getScrolledPositionFromRecord(
+      manifest.lastRecord
+    );
     const cachedScrolledPosition = initialScrolledHref
       ? getScrolledPosition(
           manifest.book.sourceId,
@@ -2628,12 +2784,16 @@ export default function BookReadPage() {
         )
       : null;
     pendingScrolledRestoreRef.current =
-      settings.mode === 'scrolled' && !currentSessionHref
-        ? cachedScrolledPosition
+      settings.mode === 'scrolled' && !currentSessionCfi
+        ? historyScrolledPosition || cachedScrolledPosition
         : null;
     restoreTargetRef.current =
       settings.mode === 'scrolled'
-        ? initialScrolledHref || cachedScrolledPosition?.href || undefined
+        ? currentSessionCfi ||
+          initialScrolledHref ||
+          historyScrolledPosition?.href ||
+          cachedScrolledPosition?.href ||
+          undefined
         : currentSessionCfi || manifest.lastRecord?.locator?.value || undefined;
 
     loadEpubScript()
@@ -3422,9 +3582,7 @@ export default function BookReadPage() {
                       ).map((mode) => (
                         <button
                           key={mode.key}
-                          onClick={() =>
-                            setSettings((prev) => ({ ...prev, mode: mode.key }))
-                          }
+                          onClick={() => switchReaderMode(mode.key)}
                           className={`rounded-2xl border px-3 py-3 text-left ${
                             settings.mode === mode.key
                               ? 'border-emerald-500 bg-emerald-50 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-300'
