@@ -4,7 +4,7 @@ import { AlertTriangle, ArrowLeft, Clock, Heart, Loader2, Maximize, Radio, Rotat
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 
-import { deleteFavorite, isFavorited, saveFavorite, savePlayRecord } from '@/lib/db.client';
+import { deleteFavorite, isFavorited, saveFavorite } from '@/lib/db.client';
 
 import TVNativeVideo from '@/components/tv/player/TVNativeVideo';
 import TVVirtualRemote from '@/components/tv/TVVirtualRemote';
@@ -168,21 +168,6 @@ function TVLivePlayClient() {
         if (!alive) return;
         setUnsupportedError(err instanceof Error ? err.message : '不支持的直播流格式');
       });
-    if (source) {
-      savePlayRecord(`live_${source.key}`, `live_${channel.id}`, {
-        title: channel.name,
-        source_name: source.name,
-        year: '',
-        cover: getLogoUrl(channel.logo, source.key),
-        index: 1,
-        total_episodes: 1,
-        play_time: 0,
-        total_time: 0,
-        save_time: Date.now(),
-        search_title: channel.name,
-        origin: 'live',
-      }).catch(() => undefined);
-    }
     return () => { alive = false; };
   }, [channel, source]);
 
