@@ -21,7 +21,6 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
-import android.widget.TextView;
 
 import java.net.URLEncoder;
 
@@ -31,7 +30,6 @@ public class MainActivity extends Activity implements RemoteCommandHandler {
     private View customView;
     private WebChromeClient.CustomViewCallback customViewCallback;
     private LocalRemoteServer localRemoteServer;
-    private TextView remoteHintView;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
@@ -148,10 +146,6 @@ public class MainActivity extends Activity implements RemoteCommandHandler {
             return localRemoteServer == null ? -1 : localRemoteServer.getPort();
         }
 
-        @JavascriptInterface
-        public void showHint() {
-            mainHandler.post(() -> showLocalRemoteHint(true));
-        }
     }
 
     private void injectLocalRemoteInfo() {
@@ -164,38 +158,9 @@ public class MainActivity extends Activity implements RemoteCommandHandler {
         webView.evaluateJavascript(script, null);
     }
 
-    private void showLocalRemoteHint(boolean persistent) {
-        String url = localRemoteServer == null ? null : localRemoteServer.getRemoteUrl();
-        if (url == null) return;
-        if (remoteHintView == null) {
-            remoteHintView = new TextView(this);
-            remoteHintView.setTextColor(0xFFE0E7FF);
-            remoteHintView.setTextSize(13);
-            remoteHintView.setPadding(18, 12, 18, 12);
-            remoteHintView.setBackgroundColor(0xAA111827);
-            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-            params.leftMargin = 24;
-            params.topMargin = 24;
-            root.addView(remoteHintView, params);
-        }
-        remoteHintView.setText("局域网遥控：手机浏览器打开\n" + url);
-        remoteHintView.setVisibility(View.VISIBLE);
-        if (!persistent) {
-            mainHandler.postDelayed(() -> {
-                if (remoteHintView != null) {
-                    remoteHintView.setVisibility(View.GONE);
-                }
-            }, 15000);
-        }
-    }
-
     private void setupLocalRemoteServer() {
         localRemoteServer = new LocalRemoteServer(this);
         localRemoteServer.start();
-        showLocalRemoteHint(false);
     }
 
     private int keyCodeForRemoteKey(String key, String digit) {

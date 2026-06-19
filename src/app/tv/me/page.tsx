@@ -37,7 +37,6 @@ const LOCAL_REMOTE_URL_KEY = 'moontv_local_remote_url';
 
 type MoonTVLocalRemoteBridge = {
   getRemoteUrl?: () => string;
-  showHint?: () => void;
 };
 
 declare global {
@@ -89,7 +88,6 @@ export default function TVMePage() {
   const [loggingOut, setLoggingOut] = useState(false);
   const [error, setError] = useState('');
   const [localRemoteUrl, setLocalRemoteUrl] = useState('');
-  const [nativeHintAvailable, setNativeHintAvailable] = useState(false);
   const [copyStatus, setCopyStatus] = useState('');
   const [upDownAction, setUpDownAction] = useState<TVPlayerUpDownAction>(
     DEFAULT_TV_PLAYER_UP_DOWN_ACTION
@@ -107,7 +105,6 @@ export default function TVMePage() {
   useEffect(() => {
     const readLocalRemoteUrl = () => {
       const bridgeUrl = window.MoonTVLocalRemote?.getRemoteUrl?.() || '';
-      setNativeHintAvailable(Boolean(window.MoonTVLocalRemote?.showHint));
       setLocalRemoteUrl(
         bridgeUrl ||
         window.__MOONTV_LOCAL_REMOTE_URL ||
@@ -184,9 +181,6 @@ export default function TVMePage() {
   };
 
 
-  const showLocalRemoteHint = () => {
-    window.MoonTVLocalRemote?.showHint?.();
-  };
 
   const copyLocalRemoteUrl = async () => {
     if (!localRemoteUrl) return;
@@ -310,7 +304,7 @@ export default function TVMePage() {
                   手机扫码遥控
                 </h2>
                 <p className='mt-4 text-xl leading-relaxed text-slate-300'>
-                  在同一 Wi‑Fi 下用手机打开遥控地址，不经过服务器，方向键和播放控制更低延迟。
+                  在同一 Wi‑Fi 下用手机扫描二维码或打开遥控地址。
                 </p>
 
                 {localRemoteUrl ? (
@@ -320,16 +314,6 @@ export default function TVMePage() {
                       {localRemoteUrl}
                     </div>
                     <div className='mt-5 flex flex-wrap gap-3'>
-                      {nativeHintAvailable && (
-                        <button
-                          type='button'
-                          onClick={showLocalRemoteHint}
-                          className='tv-focusable inline-flex cursor-pointer items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-5 py-4 text-lg font-black text-white outline-none transition hover:bg-indigo-500 focus:ring-4 focus:ring-indigo-300'
-                        >
-                          <QrCode className='h-6 w-6' />
-                          在电视上显示
-                        </button>
-                      )}
                       <button
                         type='button'
                         onClick={copyLocalRemoteUrl}
@@ -347,7 +331,7 @@ export default function TVMePage() {
                   </div>
                 ) : (
                   <div className='mt-6 rounded-3xl border border-amber-300/20 bg-amber-400/10 p-5 text-lg leading-relaxed text-amber-100'>
-                    当前页面未检测到 APK 内置局域网遥控服务。请使用新版 APK 打开电视端，或查看电视左上角的临时遥控地址。
+                    当前页面未检测到 APK 内置局域网遥控服务。请使用新版 APK 打开电视端。
                   </div>
                 )}
               </div>

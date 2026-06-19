@@ -11,7 +11,6 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
-import android.widget.TextView;
 
 import org.mozilla.geckoview.GeckoRuntime;
 import org.mozilla.geckoview.GeckoSession;
@@ -26,7 +25,6 @@ public class MainActivity extends Activity implements RemoteCommandHandler {
     private GeckoView geckoView;
     private boolean canGoBack = false;
     private LocalRemoteServer localRemoteServer;
-    private TextView remoteHintView;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
     @Override
@@ -73,21 +71,6 @@ public class MainActivity extends Activity implements RemoteCommandHandler {
     private void setupLocalRemoteServer() {
         localRemoteServer = new LocalRemoteServer(this);
         localRemoteServer.start();
-        String url = localRemoteServer.getRemoteUrl();
-        if (url == null) return;
-        remoteHintView = new TextView(this);
-        remoteHintView.setText("局域网遥控：手机浏览器打开\n" + url);
-        remoteHintView.setTextColor(0xFFE0E7FF);
-        remoteHintView.setTextSize(13);
-        remoteHintView.setPadding(18, 12, 18, 12);
-        remoteHintView.setBackgroundColor(0xAA111827);
-        addContentView(remoteHintView, new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-        ));
-        mainHandler.postDelayed(() -> {
-            if (remoteHintView != null) remoteHintView.setVisibility(View.GONE);
-        }, 15000);
     }
 
     private int keyCodeForRemoteKey(String key, String digit) {
